@@ -1,0 +1,114 @@
+#!/bin/bash
+
+bold=$(tput bold)
+italic=$(tput sitm) 
+normal=$(tput sgr0)
+
+input=$1
+voice=$2
+
+echo
+
+# check 'espeak' dependency
+if [[ ! -f $(which espeak) ]]; then
+    echo -e "\tUnsatisfied dependency: ${bold}espeak\n"
+    exit 1
+
+# exit if no argument is given
+elif [[ "$input" == "" ]]; then
+    echo -e "\tNo arguments.\n"
+    exit 1
+
+else
+    # check the second argument (voice)
+    # if the argument is left blank or an invalid option is specified,
+    #   revert to 'en'
+    if [[ $voice == "" ]] || \
+      [[ $(espeak --voices | awk '{print $2}' | grep "$voice") == "" ]]; then
+        echo -e "\tArgument 2: absent or invalid."
+        echo -e "\t==> Please see ${italic}espeak --voices ${normal}output."
+        echo -e "\t==> Continuing with default voice (${bold}en${normal})...\n"
+        voice=en
+    fi
+    
+    # if input is a PDF file, try to convert to plain text
+    if [[ $(echo $input | grep ".pdf$") != "" ]]; then
+        
+        # check 'xpdf' depency for converting PDF to plain text
+        if [[ -f $(which pdftotext) ]]; then
+            input_pdf="$input"
+            rm /tmp/output_txt >> /dev/null 2>&1
+            pdftotext "$input_pdf" /tmp/output_txt >> /dev/null 2>&1 | \
+                echo -e "\tConverting PDF to plain text, please wait..."
+        
+            echo -en "\tWould you like to save audio to a file? [y/N]\t"
+            read user_input
+            echo
+
+            # export 'espeak' output to wave audio file
+            if [[ "$user_input" == "y" ]]; then
+                output_wav=$(echo $input_pdf | tr pdf wav)
+                output_wav=$(echo "${output_wav##*/}")
+                espeak -v $voice -f /tmp/output_txt -w $HOME/$output_wav
+                
+                # convert wav file to mp3 if lame is available
+                echo -e "\tGenerated output: $HOME/$output_wav"
+                echo -en "\tConvert to mp3? [y/N]\t"
+                read user_input
+                echo
+                if [[ "$user_input" == y ]]; then
+                    echo -e "\tTrying to convert wav output to mp3..."
+                    if [[ -f $(which lame) ]]; then
+                        output_mp3=$(echo $output_wav | tr wav mp3)
+                        echo
+                        lame -b 320 $HOME/$output_wav $HOME/$output_mp3
+                        echo
+                        rm $HOME/$output_wav
+                        output=$output_mp3
+                    else
+                        echo -e "\t${lame} not found."
+                        output=$output_wav
+                    fi
+                else
+                    output=$output_wav
+                fi
+
+                echo -e "\tAudio saved to $HOME/$output"
+                echo -en "\tReproduce the file now? [Y/n]\t"
+                read user_input
+                echo
+
+                # try to reproduce audio with a supported player
+                if [[ "$user_input" != "n" ]]; then
+                    if [[ -f $(which mpv) ]]; then
+                        player=mpv
+                    elif [[ -f $(which vlc) ]]; then
+                        player=vlc
+                    elif [[ -f $(which xdg-open) ]]; then
+                        player=xdg-open
+                    else
+                        echo -e "\tImpossible to find a valid player."
+                        echo -e "\t==> Install ${bold}xdg-open ${normal} for automatic selection.\n"
+                        exit 1
+                    fi
+                    echo
+                    $player $HOME/$output
+                else
+                    echo
+                    exit 1
+                fi
+            else
+                echo -e "\tStarting reprodution...\n"
+                espeak -v $voice -f /tmp/output_txt >> /dev/null 2>&1
+                echo
+                exit 1
+            fi
+        else
+            echo -e "\tUnsatisfied dependency: ${bold}xpdf\n"
+            exit 1
+        fi
+    else
+        espeak -v $voice $input &> /dev/null
+        echo
+    fi
+fi
